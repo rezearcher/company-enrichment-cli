@@ -1,0 +1,11 @@
+{
+  "name": "company-enrichment-cli",
+  "version": "0.1.0",
+  "description": "Give it a domain, get live-from-source company enrichment: firmographics, verified business contacts, tech-stack fingerprint, social links, and a live hiring signal across 8 ATS platforms. No API key, no account.",
+  "type": "module",
+  "bin": { "company-enrichment": "cli.js" },
+  "engines": { "node": ">=18" },
+  "dependencies": { "cheerio": "^1.0.0" },
+  "scripts": { "start": "node cli.js" },
+  "license": "ISC"
+}
