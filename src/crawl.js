@@ -19,6 +19,7 @@ import net from 'node:net';
 
 const REQUEST_TIMEOUT_MS = Number(process.env.ENRICH_REQUEST_TIMEOUT_MS) || 20000;
 const MAX_RESPONSE_BYTES = Number(process.env.ENRICH_MAX_RESPONSE_BYTES) || 5 * 1024 * 1024; // 5 MB/page
+const MAX_REDIRECTS = Number(process.env.ENRICH_MAX_REDIRECTS) || 5;
 const UA =
   process.env.ENRICH_USER_AGENT ||
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36';
@@ -86,27 +87,53 @@ function readCapped(res, url) {
   })();
 }
 
+// Validate one hop (protocol + SSRF guard) before any fetch leaves the process.
+async function assertFetchable(u) {
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new Error(`refusing non-http(s) ${u.href}`);
+  await assertPublicHost(u.hostname);
+}
+
 // Fetch one URL under timeout + size bound. Returns {url, finalUrl, status, html,
 // headers} or throws. Only text/html (and unknown) content is returned as html.
+//
+// Redirects are followed MANUALLY (redirect:'manual') so every hop's target is
+// re-validated through the SSRF guard. Native redirect:'follow' re-resolves the
+// Location host itself and would let a public site 302 the runner to an internal
+// address (http://169.254.169.254/ cloud metadata, 127.0.0.1, 10.x) — the initial
+// assertPublicHost only sees the first host, not the redirect target. The timeout
+// bounds the WHOLE chain, and MAX_REDIRECTS bounds the hop count.
 export async function fetchPage(url, { fetchImpl = fetch } = {}) {
-  const u = new URL(url);
-  if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new Error(`refusing non-http(s) ${url}`);
-  await assertPublicHost(u.hostname);
+  let current = new URL(url);
+  await assertFetchable(current);
 
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), REQUEST_TIMEOUT_MS);
   try {
-    const res = await fetchImpl(url, {
-      signal: ctl.signal,
-      redirect: 'follow',
-      headers: { 'user-agent': UA, accept: 'text/html,application/xhtml+xml,*/*;q=0.8' },
-    });
-    const ctype = (res.headers.get('content-type') || '').toLowerCase();
-    const headers = {};
-    res.headers.forEach((v, k) => { headers[k] = v; });
-    const isHtml = !ctype || ctype.includes('html') || ctype.includes('xml') || ctype.includes('text');
-    const html = isHtml ? await readCapped(res, url) : '';
-    return { url, finalUrl: res.url || url, status: res.status, html, headers, contentType: ctype };
+    for (let hop = 0; ; hop++) {
+      const res = await fetchImpl(current.href, {
+        signal: ctl.signal,
+        redirect: 'manual',
+        headers: { 'user-agent': UA, accept: 'text/html,application/xhtml+xml,*/*;q=0.8' },
+      });
+      const status = res.status;
+      const location = typeof res.headers.get === 'function' ? res.headers.get('location') : null;
+      // 3xx with a Location: validate the target host through the SSRF guard, then hop.
+      if (status >= 300 && status < 400 && location) {
+        if (hop >= MAX_REDIRECTS) throw new Error(`too many redirects (>${MAX_REDIRECTS}) from ${url}`);
+        let next;
+        try { next = new URL(location, current); } catch { throw new Error(`bad redirect target "${location}" from ${current.href}`); }
+        await assertFetchable(next); // re-run SSRF guard on EVERY hop — the fix
+        if (typeof res.body?.cancel === 'function') { try { await res.body.cancel(); } catch { /* drained */ } }
+        current = next;
+        continue;
+      }
+      const ctype = (res.headers.get('content-type') || '').toLowerCase();
+      const headers = {};
+      res.headers.forEach((v, k) => { headers[k] = v; });
+      const isHtml = !ctype || ctype.includes('html') || ctype.includes('xml') || ctype.includes('text');
+      const html = isHtml ? await readCapped(res, current.href) : '';
+      return { url, finalUrl: res.url || current.href, status, html, headers, contentType: ctype };
+    }
   } catch (e) {
     if (e && e.name === 'AbortError') throw new Error(`timed out after ${REQUEST_TIMEOUT_MS}ms for ${url}`);
     throw e;

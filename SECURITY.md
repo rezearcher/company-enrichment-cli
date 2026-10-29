@@ -13,6 +13,13 @@ fetch it rejects non-`http(s)` schemes, `localhost`/`*.local`/`*.internal` names
 that resolves to a loopback, private (RFC 1918), link-local, CGNAT, or IPv6 unique-local address.
 A crafted "domain" therefore cannot pivot the runner into an internal network.
 
+**Redirects are followed manually and re-validated on every hop.** Native `fetch` with
+`redirect:'follow'` would re-resolve a 3xx `Location` host itself, letting a *public* site bounce
+the runner to an internal target (`http://169.254.169.254/` cloud metadata, `127.0.0.1`, `10.x`)
+the initial host check never saw. The crawler uses `redirect:'manual'` and runs the full SSRF
+guard on every hop before fetching it (bounded by `ENRICH_MAX_REDIRECTS`, default 5). Covered by
+`test/ssrf_check.js`.
+
 ## Credentials & COGS
 No credentials are held or required. All upstreams are keyless: the company's own public website,
 free DNS (MX/A), the public ATS JSON endpoints, and an optional raw-TCP SMTP probe. No paid API,
