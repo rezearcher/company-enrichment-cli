@@ -65,9 +65,23 @@ nothing is invented. See [SECURITY.md](./SECURITY.md) for the bounded-fetch + SS
 Need it at scale with managed infrastructure and metered billing? The hosted actor runs the same
 core on Apify with pay-per-enriched-company pricing.
 
+## Related tools (same maintained engine)
+
+The live hiring signal above is derived from the same 8-ATS engine
+(Greenhouse · Lever · Ashby · SmartRecruiters · Workday · Recruitee · Workable · BambooHR)
+that powers Grey Ridge's standalone jobs tools. Want the **raw per-role feed** instead of a
+rolled-up company signal?
+
+- **[ats-jobs-scraper-cli](https://github.com/rezearcher/ats-jobs-scraper-cli)** — normalized,
+  deduplicated job rows across the eight ATS platforms, one record per open role.
+- **[unified-jobs-scraper-cli](https://github.com/rezearcher/unified-jobs-scraper-cli)** — that
+  ATS feed merged with LinkedIn public postings into one deduplicated feed.
+- **[jobs-mcp-server](https://github.com/rezearcher/jobs-mcp-server)** — the same feed as a Model
+  Context Protocol tool for Claude Desktop, Cursor, Cline and other agents.
+
 ## Local
 ```bash
 npm install
 node cli.js stripe.com --pretty
 ```
-MIT/ISC — free to use.
+ISC — free to use.
