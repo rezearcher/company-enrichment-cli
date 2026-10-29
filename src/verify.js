@@ -13,6 +13,7 @@
 
 import { promises as dns } from 'node:dns';
 import net from 'node:net';
+import { isPublicHost } from './crawl.js';
 
 const SMTP_TIMEOUT_MS = Number(process.env.ENRICH_SMTP_TIMEOUT_MS) || 6000;
 const SMTP_FROM = process.env.ENRICH_SMTP_FROM || 'verify@example.com';
@@ -100,9 +101,18 @@ export async function verifyEmails(emails, { enableSmtp = false } = {}) {
     else if (!mx.hasMx) grade = 'D';
     else grade = 'B';
     if (enableSmtp && mx.hasMx && mx.hosts[0]) {
-      smtp = await smtpProbe(mx.hosts[0], e.email);
-      if (smtp === 'accepted') grade = 'A';
-      else if (smtp === 'rejected') grade = 'F';
+      // SSRF guard: the MX host comes from the caller's own DNS, so a crafted
+      // domain could publish an MX pointing at an internal/loopback host and turn
+      // this raw TCP probe into an internal port-scan / open-relay connect. Only
+      // probe hosts that resolve entirely to public addresses; otherwise skip
+      // (degrade open — keep the MX-based grade, never connect).
+      if (await isPublicHost(mx.hosts[0])) {
+        smtp = await smtpProbe(mx.hosts[0], e.email);
+        if (smtp === 'accepted') grade = 'A';
+        else if (smtp === 'rejected') grade = 'F';
+      } else {
+        smtp = 'skipped_private_mx';
+      }
     }
     out.push({
       ...e,

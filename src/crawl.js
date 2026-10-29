@@ -62,6 +62,24 @@ async function assertPublicHost(host) {
   }
 }
 
+// Boolean form of the SSRF guard for non-fetch sinks (e.g. the SMTP probe in
+// verify.js that opens a raw TCP socket to an MX host taken from caller-controlled
+// DNS). Returns true only if the host is a name/IP that resolves ENTIRELY to
+// public addresses. Any failure / private hop => false (fail closed).
+export async function isPublicHost(host) {
+  try {
+    if (!host) return false;
+    if (net.isIP(host) && isPrivateIp(host)) return false;
+    if (/^(localhost|.*\.local|.*\.internal)$/i.test(host)) return false;
+    if (net.isIP(host)) return true; // public literal IP
+    const addrs = await dns.lookup(host, { all: true });
+    if (!addrs.length) return false;
+    return addrs.every(({ address }) => !isPrivateIp(address));
+  } catch {
+    return false;
+  }
+}
+
 function readCapped(res, url) {
   const declared = Number(res.headers.get('content-length'));
   if (Number.isFinite(declared) && declared > MAX_RESPONSE_BYTES) {
